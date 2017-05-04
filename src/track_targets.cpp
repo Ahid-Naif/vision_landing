@@ -233,7 +233,7 @@ int main(int argc, char** argv) {
         inputfps = args::get(fps);
     
     // If realsense streamtype is specified then use, otherwise set to colour stream
-    string inputstream ("colour");
+    string inputstream = "colour";
     if (streamtype)
         inputstream = args::get(streamtype);
 
@@ -244,25 +244,50 @@ int main(int argc, char** argv) {
 
     /* Instead of opening a VideoCapture object, use librealsense */
     rs::context ctx;
-    if(ctx.get_device_count() == 0) throw std::runtime_error("No device detected. Is it plugged in?");
+    if(ctx.get_device_count() == 0) throw std::runtime_error("No RealSense camera detected");
     rs::device * dev = ctx.get_device(0);
     cout << "info:realsense:device:" << dev->get_name() << endl;
     cout << "info:realsense:serialno:" << dev->get_serial() << endl;
     cout << "info:realsense:firmware:" << dev->get_firmware_version() << endl;
     
     // Pick input stream depending on streamtype setting
-    if (inputstream.compare("colour")) {
+    if (inputstream == "colour") {
         cout << "info:realsense:stream:colour" << endl;
         dev->enable_stream(rs::stream::color, inputwidth, inputheight, rs::format::bgr8, inputfps);
-    } else if (inputstream.compare("infrared")) {
-        cout << "info:realsense:stream:infrared" << endl;
+    } else if (inputstream == "infrared" || inputstream == "hybrid") {
+        cout << "info:realsense:stream:" << inputstream << endl;
+        dev->enable_stream(rs::stream::color, inputwidth, inputheight, rs::format::bgr8, inputfps);
         // Configure Infrared stream
         dev->enable_stream(rs::stream::infrared, inputwidth, inputheight, rs::format::y8, inputfps);
         // Must also configure depth stream for IR stream to run properly
         dev->enable_stream(rs::stream::depth, inputwidth, inputheight, rs::format::z16, inputfps);
     }
     dev->start();
-    // Camera warmup - Dropped several first frames to let auto-exposure stabilize
+
+    // Set camera settings - https://github.com/IntelRealSense/librealsense/issues/208#issuecomment-234763197 
+    dev->set_option(rs::option::r200_emitter_enabled, 0); //disable IR laser pattern
+    // dev->set_option(rs::option::color_enable_auto_exposure, 1); // disable/manual exposure
+    dev->set_option(rs::option::color_enable_auto_exposure, 1); // aperture priority / automatic exposure
+    dev->set_option(rs::option::color_backlight_compensation, 0);
+    // dev->set_option(rs::option::color_brightness, 62);
+    dev->set_option(rs::option::color_brightness, 42);
+    // dev->set_option(rs::option::color_contrast, 38);
+    dev->set_option(rs::option::color_contrast, 20);
+    dev->set_option(rs::option::color_enable_auto_white_balance, 0);
+    // dev->set_option(rs::option::color_gain, 88);
+    dev->set_option(rs::option::color_gain, 68);
+    dev->set_option(rs::option::color_gamma, 180);
+    dev->set_option(rs::option::color_hue, -1018);
+    // color_optical_frame_id: camera_rgb_optical_frame
+    //dev->set_option(rs::option::color_saturation, 87);
+    dev->set_option(rs::option::color_saturation, 67);
+    dev->set_option(rs::option::color_sharpness, 7);
+    dev->set_option(rs::option::color_white_balance, 2987);
+    dev->set_option(rs::option::r200_lr_auto_exposure_enabled, 1);
+    dev->set_option(rs::option::r200_lr_exposure, 15);
+    dev->set_option(rs::option::r200_lr_gain, 200);
+
+    // Camera warmup - Dropped several first frames to let auto-exposure stabilize and settings to take effect
     for(int i = 0; i < 30; i++) dev->wait_for_frames();
 
     // Read and parse camera calibration data
@@ -274,8 +299,8 @@ int main(int argc, char** argv) {
     }
 
     // Take a single image and resize calibration parameters based on input stream dimensions
-    Mat rawimage(Size(inputwidth, inputheight), inputstream.compare("colour") ? CV_8UC3 : CV_8UC1, inputstream.compare("colour") ? (void*)dev->get_frame_data(rs::stream::color) :  (void*)dev->get_frame_data(rs::stream::infrared), Mat::AUTO_STEP);
-    if (inputstream.compare("infrared"))
+    Mat rawimage(Size(inputwidth, inputheight), inputstream == "colour" || inputstream == "hybrid" ? CV_8UC3 : CV_8UC1, inputstream == "colour" || inputstream == "hybrid" ? (void*)dev->get_frame_data(rs::stream::color) :  (void*)dev->get_frame_data(rs::stream::infrared), Mat::AUTO_STEP);
+    if (inputstream == "infrared")
         cvtColor(rawimage,rawimage,CV_GRAY2RGB);
     CamParam.resize(rawimage.size());
 
@@ -375,9 +400,12 @@ int main(int argc, char** argv) {
         
         // Copy image from input stream to cv matrix, skip iteration if empty
         dev->wait_for_frames();
-        Mat rawimage(Size(inputwidth, inputheight), inputstream.compare("colour") ? CV_8UC3 : CV_8UC1, inputstream.compare("colour") ? (void*)dev->get_frame_data(rs::stream::color) :  (void*)dev->get_frame_data(rs::stream::infrared), Mat::AUTO_STEP);
-        if (inputstream.compare("infrared"))
-            cvtColor(rawimage,rawimage,CV_GRAY2RGB);
+        Mat rawimage(Size(inputwidth, inputheight), inputstream == "colour" || inputstream == "hybrid" ? CV_8UC3 : CV_8UC1, inputstream == "colour" || inputstream == "hybrid" ? (void*)dev->get_frame_data(rs::stream::color) :  (void*)dev->get_frame_data(rs::stream::infrared), Mat::AUTO_STEP);
+        if (inputstream == "infrared") {
+            equalizeHist(rawimage, rawimage);
+            applyColorMap(rawimage, rawimage, COLORMAP_JET);
+            // cvtColor(rawimage,rawimage,CV_GRAY2RGB);
+        }
         if (rawimage.empty()) continue;
 
         // Detect markers
@@ -467,6 +495,27 @@ int main(int argc, char** argv) {
             }
         }
     
+        // Temp - if infrared stream, also retrieve depth image and use that to overlay AR markers
+        // http://www.samontab.com/web/2016/04/interfacing-intel-realsense-f200-with-opencv/
+        // https://software.intel.com/en-us/articles/using-librealsense-and-opencv-to-stream-rgb-and-depth-data
+        if (inputstream == "hybrid") {
+           // Create depth image
+           cv::Mat depth16( inputheight,
+              inputwidth,
+              CV_16U,
+              (uchar *)dev->get_frame_data(rs::stream::depth));
+            cv::Mat depth8u = depth16;
+            depth8u.convertTo( depth8u, CV_8UC1, 255.0/1000 );
+           // cv::Mat depth8u;
+           // depth8u.convertTo( depth8u, CV_8UC1, 255.0/1000 );
+           // depth16.convertTo( depth8u, CV_8UC1 );
+            // equalizeHist(depth8u, depth8u);
+            applyColorMap(depth8u, rawimage, COLORMAP_JET);
+           // depth16.convertTo( rawimage, CV_8UC3 );
+           // cvtColor(depth8u,rawimage,CV_GRAY2RGB);
+           // rawimage = depth8u;
+        }
+
         // Iterate through each detected marker and send data for active marker and draw green AR cube, otherwise draw red AR square
         for (unsigned int i = 0; i < Markers.size(); i++) {
             // If marker id matches current active marker, draw a green AR cube
