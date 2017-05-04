@@ -9,7 +9,9 @@ find_package(OpenCV REQUIRED)
 
 find_package(aruco REQUIRED)
 
-include_directories(${aruco_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS})
-target_link_libraries(track_targets ${aruco_LIBS} ${OpenCV_LIBS})
+find_package(realsense REQUIRED)
+
+include_directories(${aruco_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${realsense_INCLUDE_DIR})
+target_link_libraries(track_targets ${aruco_LIBS} ${OpenCV_LIBS} ${realsense_LIBRARY})
 
 install(PROGRAMS track_targets DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/..)

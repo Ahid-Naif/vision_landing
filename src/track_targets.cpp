@@ -2,6 +2,8 @@
 track_targets
 https://github.com/fnoop/vision_landing
 
+** Intel Realsense Branch **
+
 This program uses opencv and aruco to detect fiducial markers in a stream.
 It uses tracking across images in order to avoid ambiguity problem with a single marker.
 For each target detected, it performs pose estimation and outputs the marker ID and translation vectors.
@@ -29,6 +31,7 @@ Run separately with: ./track_targets -d TAG36h11 /dev/video0 calibration.yml 0.2
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/calib3d/calib3d.hpp>
 #include "aruco/aruco.h"
+#include <librealsense/rs.hpp>
 
 using namespace cv;
 using namespace aruco;
@@ -176,6 +179,7 @@ int main(int argc, char** argv) {
     args::ValueFlag<int> markerhistory(parser, "markerhistory", "Marker tracking history, in frames", {"markerhistory"});
     args::ValueFlag<int> markerthreshold(parser, "markerthreshold", "Marker tracking threshold, percentage", {"markerthreshold"});
     args::ValueFlag<string> fourcc(parser, "fourcc", "FourCC CoDec code", {'c', "fourcc"});
+    args::ValueFlag<string> streamtype(parser, "streamtype", "Realsense Stream Type", {'s', "streamtype"});
     args::Positional<string> input(parser, "input", "Input Stream");
     args::Positional<string> calibration(parser, "calibration", "Calibration Data");
     args::Positional<double> markersize(parser, "markersize", "Marker Size");
@@ -208,17 +212,6 @@ int main(int argc, char** argv) {
         return 1;
     }
     
-    // Setup core objects
-    aruco::CameraParameters CamParam;
-    Mat rawimage;
-    VideoCapture vreader(args::get(input));
-
-    // Bail if camera can't be opened
-    if (!vreader.isOpened()) {
-        cerr << "Error: Input stream can't be opened" << endl;
-        return 1;
-    }
-
     // Register signals
     signal(SIGINT, handle_sig);
     signal(SIGTERM, handle_sig);
@@ -238,19 +231,42 @@ int main(int argc, char** argv) {
     int inputfps = 30;
     if (fps)
         inputfps = args::get(fps);
-        
+    
+    // If realsense streamtype is specified then use, otherwise set to colour stream
+    string inputstream ("colour");
+    if (streamtype)
+        inputstream = args::get(streamtype);
+
     // If brightness is specified then use, otherwise use default
     double inputbrightness = 0.5;
     if (brightness)
         inputbrightness = args::get(brightness);
 
-    // Set camera properties
-    vreader.set(CAP_PROP_BRIGHTNESS, inputbrightness);
-    vreader.set(CV_CAP_PROP_FRAME_WIDTH, inputwidth);
-    vreader.set(CV_CAP_PROP_FRAME_HEIGHT, inputheight);
-    vreader.set(CV_CAP_PROP_FPS, inputfps);
+    /* Instead of opening a VideoCapture object, use librealsense */
+    rs::context ctx;
+    if(ctx.get_device_count() == 0) throw std::runtime_error("No device detected. Is it plugged in?");
+    rs::device * dev = ctx.get_device(0);
+    cout << "info:realsense:device:" << dev->get_name() << endl;
+    cout << "info:realsense:serialno:" << dev->get_serial() << endl;
+    cout << "info:realsense:firmware:" << dev->get_firmware_version() << endl;
+    
+    // Pick input stream depending on streamtype setting
+    if (inputstream.compare("colour")) {
+        cout << "info:realsense:stream:colour" << endl;
+        dev->enable_stream(rs::stream::color, inputwidth, inputheight, rs::format::bgr8, inputfps);
+    } else if (inputstream.compare("infrared")) {
+        cout << "info:realsense:stream:infrared" << endl;
+        // Configure Infrared stream
+        dev->enable_stream(rs::stream::infrared, inputwidth, inputheight, rs::format::y8, inputfps);
+        // Must also configure depth stream for IR stream to run properly
+        dev->enable_stream(rs::stream::depth, inputwidth, inputheight, rs::format::z16, inputfps);
+    }
+    dev->start();
+    // Camera warmup - Dropped several first frames to let auto-exposure stabilize
+    for(int i = 0; i < 30; i++) dev->wait_for_frames();
 
     // Read and parse camera calibration data
+    aruco::CameraParameters CamParam;
     CamParam.readFromXMLFile(args::get(calibration));
     if (!CamParam.isValid()) {
         cerr << "Calibration Parameters not valid" << endl;
@@ -258,9 +274,11 @@ int main(int argc, char** argv) {
     }
 
     // Take a single image and resize calibration parameters based on input stream dimensions
-    vreader >> rawimage;
+    Mat rawimage(Size(inputwidth, inputheight), inputstream.compare("colour") ? CV_8UC3 : CV_8UC1, inputstream.compare("colour") ? (void*)dev->get_frame_data(rs::stream::color) :  (void*)dev->get_frame_data(rs::stream::infrared), Mat::AUTO_STEP);
+    if (inputstream.compare("infrared"))
+        cvtColor(rawimage,rawimage,CV_GRAY2RGB);
     CamParam.resize(rawimage.size());
-    
+
     // Calculate the fov from the calibration intrinsics
     const double pi = std::atan(1)*4;
     const double fovx = 2 * atan(inputwidth / (2 * CamParam.CameraMatrix.at<float>(0,0))) * (180.0/pi); 
@@ -294,14 +312,6 @@ int main(int argc, char** argv) {
     // Start framecounter at 0 for fps tracking
     int frameno=0;
 
-    // Setup stdin listener
-    /*
-    string incommand;
-    pollfd cinfd[1];
-    cinfd[0].fd = fileno(stdin);
-    cinfd[0].events = POLLIN;
-    */
-    
     // Create a map of marker sizes from 'sizemapping' config setting
     map<uint32_t,float> markerSizes;
     stringstream ss(args::get(sizemapping));
@@ -353,44 +363,21 @@ int main(int argc, char** argv) {
             break;
         }
 
-        // Listen for commands on stdin
-        // This doesn't work yet, it does weird things as soon as something comes in on stdin
-        /*
-        if (poll(cinfd, 1, 1000))
-        {
-            cout << "INCOMING MESSAGE!:" << endl;
-            // getline(cin, incommand);
-            // cin >> incommand;
-            // cout << "MESSAGE RECEIVED!:" << incommand << endl;
-            stateflag = 1;
-            cin.clear();
-        }
-        */
-
         // If tracking not active, skip
         if (!stateflag) {
             // Add a 1ms sleep to slow down the loop if nothing else is being done
             nanosleep((const struct timespec[]){{0, 10000000L}}, NULL);
-            // If camera is started, stop and release it
-            /*
-            https://github.com/fnoop/vision_landing/issues/45
-            if (vreader.isOpened())
-                vreader.release();
-            */
             continue;
         }
-        
-        // If camera isn't running, start it
-        /*
-        if (!vreader.isOpened())
-            vreader.open(args::get(input));
-        */
-        
+
         // Lodge clock for start of frame
         double framestart=CLOCK();
         
         // Copy image from input stream to cv matrix, skip iteration if empty
-        vreader >> rawimage; 
+        dev->wait_for_frames();
+        Mat rawimage(Size(inputwidth, inputheight), inputstream.compare("colour") ? CV_8UC3 : CV_8UC1, inputstream.compare("colour") ? (void*)dev->get_frame_data(rs::stream::color) :  (void*)dev->get_frame_data(rs::stream::infrared), Mat::AUTO_STEP);
+        if (inputstream.compare("infrared"))
+            cvtColor(rawimage,rawimage,CV_GRAY2RGB);
         if (rawimage.empty()) continue;
 
         // Detect markers
