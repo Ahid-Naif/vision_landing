@@ -144,6 +144,8 @@ class TrackTargets:
         # If depthscale is set, pass it through
         if args.depthscale:
             self.track_arguments.extend(['--depthscale', args.depthscale])
+        if args.camprofile:
+            self.track_arguments.extend(['--camprofile', args.camprofile])
         # Add positional arguments
         self.track_arguments.extend([args.input, calibration, args.markersize])
     def launch(self):
@@ -340,7 +342,8 @@ parser.add_argument('--fakerangefinder', '-r', action='store_true', help="Fake R
 parser.add_argument('--logdir', '-l', help="Log directory, if not specified will log to stdout")
 parser.add_argument('--controlprocessing', '-p', action='store_true', help="Control Vision Processing - enable/disable based on arming status and landing/precloiter mode")
 parser.add_argument('--streamtype', default="colour", help="Intel RealSense stream type - colour or infrared")
-parser.add_argument('--depthscale', help="Realsense Depth Scale in micrometers")
+parser.add_argument('--depthscale', help="RealSense Depth Scale in micrometers")
+parser.add_argument('--camprofile', help="RealSense camera settings profile - indoors or outoors")
 args = parser.parse_args()
 # First parse config file, and set defaults
 defaults = {}
