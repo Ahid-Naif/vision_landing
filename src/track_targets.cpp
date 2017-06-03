@@ -81,7 +81,7 @@ double avgfps()
 }
 
 // Define function to draw AR landing marker
-void drawARLandingCube(cv::Mat &Image, Marker &m, const CameraParameters &CP) {
+void drawARLandingCube(cv::Mat &Image, Marker &m, const CameraParameters &CP, Scalar color) {
     Mat objectPoints(8, 3, CV_32FC1);
     double halfSize = m.ssize / 2;
 
@@ -115,13 +115,13 @@ void drawARLandingCube(cv::Mat &Image, Marker &m, const CameraParameters &CP) {
     cv::projectPoints(objectPoints, m.Rvec, m.Tvec, CP.CameraMatrix, CP.Distorsion, imagePoints);
     // draw lines of different colours
     for (int i = 0; i < 4; i++)
-        cv::line(Image, imagePoints[i], imagePoints[(i + 1) % 4], Scalar(0, 255, 0, 255), 1, CV_AA);
+        cv::line(Image, imagePoints[i], imagePoints[(i + 1) % 4], color, 1, CV_AA);
 
     for (int i = 0; i < 4; i++)
-        cv::line(Image, imagePoints[i + 4], imagePoints[4 + (i + 1) % 4], Scalar(0, 255, 0, 255), 1, CV_AA);
+        cv::line(Image, imagePoints[i + 4], imagePoints[4 + (i + 1) % 4], color, 1, CV_AA);
 
     for (int i = 0; i < 4; i++)
-        cv::line(Image, imagePoints[i], imagePoints[i + 4], Scalar(0, 255, 0, 255), 1, CV_AA);
+        cv::line(Image, imagePoints[i], imagePoints[i + 4], color, 1, CV_AA);
 }
 
 // Print the calculated distance at bottom of image
@@ -180,6 +180,8 @@ int main(int argc, char** argv) {
     args::ValueFlag<int> markerthreshold(parser, "markerthreshold", "Marker tracking threshold, percentage", {"markerthreshold"});
     args::ValueFlag<string> fourcc(parser, "fourcc", "FourCC CoDec code", {'c', "fourcc"});
     args::ValueFlag<string> streamtype(parser, "streamtype", "Realsense Stream Type", {'s', "streamtype"});
+    args::ValueFlag<string> camprofile(parser, "camprofile", "Realsense Camera Profile", {'p', "camprofile"});
+    args::ValueFlag<int> colormap(parser, "colormap", "Colormap IR/Depth data", {"colormap"});
     args::Positional<string> input(parser, "input", "Input Stream");
     args::Positional<string> calibration(parser, "calibration", "Calibration Data");
     args::Positional<double> markersize(parser, "markersize", "Marker Size");
@@ -242,6 +244,14 @@ int main(int argc, char** argv) {
     if (brightness)
         inputbrightness = args::get(brightness);
 
+    string inputprofile = "outdoors";
+    if (camprofile)
+        inputprofile = args::get(camprofile);
+    
+    int inputcolormap = 2;
+    if (colormap)
+        inputcolormap = args::get(colormap);
+    
     /* Instead of opening a VideoCapture object, use librealsense */
     rs::context ctx;
     if(ctx.get_device_count() == 0) throw std::runtime_error("No RealSense camera detected");
@@ -264,29 +274,35 @@ int main(int argc, char** argv) {
     }
     dev->start();
 
-    // Set camera settings - https://github.com/IntelRealSense/librealsense/issues/208#issuecomment-234763197 
-    dev->set_option(rs::option::r200_emitter_enabled, 0); //disable IR laser pattern
-    // dev->set_option(rs::option::color_enable_auto_exposure, 1); // disable/manual exposure
-    dev->set_option(rs::option::color_enable_auto_exposure, 1); // aperture priority / automatic exposure
-    dev->set_option(rs::option::color_backlight_compensation, 0);
-    // dev->set_option(rs::option::color_brightness, 62);
-    dev->set_option(rs::option::color_brightness, 42);
-    // dev->set_option(rs::option::color_contrast, 38);
-    dev->set_option(rs::option::color_contrast, 20);
-    dev->set_option(rs::option::color_enable_auto_white_balance, 0);
-    // dev->set_option(rs::option::color_gain, 88);
-    dev->set_option(rs::option::color_gain, 68);
-    dev->set_option(rs::option::color_gamma, 180);
-    dev->set_option(rs::option::color_hue, -1018);
-    // color_optical_frame_id: camera_rgb_optical_frame
-    //dev->set_option(rs::option::color_saturation, 87);
-    dev->set_option(rs::option::color_saturation, 67);
-    dev->set_option(rs::option::color_sharpness, 7);
-    dev->set_option(rs::option::color_white_balance, 2987);
-    dev->set_option(rs::option::r200_lr_auto_exposure_enabled, 1);
-    dev->set_option(rs::option::r200_lr_exposure, 15);
-    dev->set_option(rs::option::r200_lr_gain, 200);
-
+    if (inputprofile == "outdoors") {
+        cout << "info::realsense:camprofile:outdoors" << endl;
+        // Set camera settings - https://github.com/IntelRealSense/librealsense/issues/208#issuecomment-234763197 
+        dev->set_option(rs::option::r200_emitter_enabled, 0); //disable IR laser pattern
+        // dev->set_option(rs::option::color_enable_auto_exposure, 1); // disable/manual exposure
+        dev->set_option(rs::option::color_enable_auto_exposure, 3); // aperture priority / automatic exposure
+        dev->set_option(rs::option::color_backlight_compensation, 0);
+        dev->set_option(rs::option::color_brightness, 62);
+        dev->set_option(rs::option::color_contrast, 38);
+        dev->set_option(rs::option::color_contrast, 20);
+        dev->set_option(rs::option::color_enable_auto_white_balance, 0);
+        dev->set_option(rs::option::color_gain, 88);
+        dev->set_option(rs::option::color_gamma, 180);
+        dev->set_option(rs::option::color_hue, -1018);
+        // color_optical_frame_id: camera_rgb_optical_frame
+        dev->set_option(rs::option::color_saturation, 87);
+        dev->set_option(rs::option::color_sharpness, 7);
+        dev->set_option(rs::option::color_white_balance, 2987);
+        /*
+        dev->set_option(rs::option::r200_auto_exposure_bottom_edge: 239);
+        dev->set_option(rs::option::r200_auto_exposure_left_edge: 0);
+        dev->set_option(rs::option::r200_auto_exposure_right_edge: 319);
+        dev->set_option(rs::option::r200_auto_exposure_top_edge: 0);
+        */
+        dev->set_option(rs::option::r200_lr_auto_exposure_enabled, 1);
+        dev->set_option(rs::option::r200_lr_exposure, 8);
+        dev->set_option(rs::option::r200_lr_gain, 100);
+    }
+    
     // Camera warmup - Dropped several first frames to let auto-exposure stabilize and settings to take effect
     for(int i = 0; i < 30; i++) dev->wait_for_frames();
 
@@ -299,9 +315,12 @@ int main(int argc, char** argv) {
     }
 
     // Take a single image and resize calibration parameters based on input stream dimensions
-    Mat rawimage(Size(inputwidth, inputheight), inputstream == "colour" || inputstream == "hybrid" ? CV_8UC3 : CV_8UC1, inputstream == "colour" || inputstream == "hybrid" ? (void*)dev->get_frame_data(rs::stream::color) :  (void*)dev->get_frame_data(rs::stream::infrared), Mat::AUTO_STEP);
+    Mat rawimage(Size(inputwidth, inputheight), inputstream == "colour" ? CV_8UC3 : CV_8UC1, inputstream == "colour" ? (void*)dev->get_frame_data(rs::stream::color) :  (void*)dev->get_frame_data(rs::stream::infrared), Mat::AUTO_STEP);
+    /*
+    // Probably unnecessary to convert gray to rgb, aruco only converts it staright back to gray again.
     if (inputstream == "infrared")
         cvtColor(rawimage,rawimage,CV_GRAY2RGB);
+    */
     CamParam.resize(rawimage.size());
 
     // Calculate the fov from the calibration intrinsics
@@ -400,12 +419,7 @@ int main(int argc, char** argv) {
         
         // Copy image from input stream to cv matrix, skip iteration if empty
         dev->wait_for_frames();
-        Mat rawimage(Size(inputwidth, inputheight), inputstream == "colour" || inputstream == "hybrid" ? CV_8UC3 : CV_8UC1, inputstream == "colour" || inputstream == "hybrid" ? (void*)dev->get_frame_data(rs::stream::color) :  (void*)dev->get_frame_data(rs::stream::infrared), Mat::AUTO_STEP);
-        if (inputstream == "infrared") {
-            equalizeHist(rawimage, rawimage);
-            applyColorMap(rawimage, rawimage, COLORMAP_JET);
-            // cvtColor(rawimage,rawimage,CV_GRAY2RGB);
-        }
+        Mat rawimage(Size(inputwidth, inputheight), inputstream == "colour" ? CV_8UC3 : CV_8UC1, inputstream == "colour" ? (void*)dev->get_frame_data(rs::stream::color) :  (void*)dev->get_frame_data(rs::stream::infrared), Mat::AUTO_STEP);
         if (rawimage.empty()) continue;
 
         // Detect markers
@@ -506,14 +520,26 @@ int main(int argc, char** argv) {
               (uchar *)dev->get_frame_data(rs::stream::depth));
             cv::Mat depth8u = depth16;
             depth8u.convertTo( depth8u, CV_8UC1, 255.0/1000 );
+            // depth8u.convertTo( depth8u, CV_8UC1, 1/256.0 );
            // cv::Mat depth8u;
            // depth8u.convertTo( depth8u, CV_8UC1, 255.0/1000 );
            // depth16.convertTo( depth8u, CV_8UC1 );
             // equalizeHist(depth8u, depth8u);
-            applyColorMap(depth8u, rawimage, COLORMAP_JET);
+            if (inputcolormap >= 0) {
+                applyColorMap(depth8u, rawimage, inputcolormap);
+            } else {
+                applyColorMap(depth8u, rawimage, COLORMAP_COOL);
+            }
            // depth16.convertTo( rawimage, CV_8UC3 );
            // cvtColor(depth8u,rawimage,CV_GRAY2RGB);
            // rawimage = depth8u;
+        } else if (inputstream == "infrared") {
+            if (inputcolormap >= 0) {
+                equalizeHist(rawimage, rawimage);
+                applyColorMap(rawimage, rawimage, inputcolormap);
+            } else {
+                cvtColor(rawimage,rawimage,CV_GRAY2RGB);
+            }
         }
 
         // Iterate through each detected marker and send data for active marker and draw green AR cube, otherwise draw red AR square
@@ -521,7 +547,11 @@ int main(int argc, char** argv) {
             // If marker id matches current active marker, draw a green AR cube
             if (Markers[i].id == active_marker) {
                 if (output) {
-                    Markers[i].draw(rawimage, Scalar(0, 255, 0), 2, false);
+                    if (inputcolormap >= 0) {
+                        Markers[i].draw(rawimage, Scalar(255, 255, 255), 2, false);
+                    } else {
+                        Markers[i].draw(rawimage, Scalar(0, 255, 0), 2, false);
+                    }
                 }
                 // If pose estimation was successful, draw AR cube and distance
                 if (Markers[i].Tvec.at<float>(0,2) > 0) {
@@ -532,16 +562,29 @@ int main(int argc, char** argv) {
                         cout << "debug:active_marker:" << active_marker << ":center~" << Markers[i].getCenter() << ":area~" << Markers[i].getArea() << ":marker~" << Markers[i] << endl;
                     cout << "target:" << Markers[i].id << ":" << xoffset << ":" << yoffset << ":" << Markers[i].Tvec.at<float>(0,2) << endl;
                     if (output) { // don't burn cpu cycles if no output
-                        drawARLandingCube(rawimage, Markers[i], CamParam);
+                        if (inputcolormap >= 0) {
+                            drawARLandingCube(rawimage, Markers[i], CamParam, Scalar(255, 255, 255, 255));
+                        } else {
+                            drawARLandingCube(rawimage, Markers[i], CamParam, Scalar(0, 255, 0, 255));
+                        }
                         CvDrawingUtils::draw3dAxis(rawimage, Markers[i], CamParam);
-                        drawVectors(rawimage, Scalar (0,255,0), 1, (i+1)*20, Markers[i].id, xoffset, yoffset, Markers[i].Tvec.at<float>(0,2), Markers[i].getCenter().x, Markers[i].getCenter().y);
+                        if (inputcolormap >= 0) {
+                            drawVectors(rawimage, Scalar (255,255,255), 1, (i+1)*20, Markers[i].id, xoffset, yoffset, Markers[i].Tvec.at<float>(0,2), Markers[i].getCenter().x, Markers[i].getCenter().y);
+                        } else {
+                            drawVectors(rawimage, Scalar (0,255,0), 1, (i+1)*20, Markers[i].id, xoffset, yoffset, Markers[i].Tvec.at<float>(0,2), Markers[i].getCenter().x, Markers[i].getCenter().y);
+                        }
                     }
                 }
             // Otherwise draw a red square
             } else {
                 if (output) { // don't burn cpu cycles if no output
-                    Markers[i].draw(rawimage, Scalar(0, 0, 255), 2, false);
-                    drawVectors(rawimage, Scalar (0,0,255), 1, (i+1)*20, Markers[i].id, 0, 0, Markers[i].Tvec.at<float>(0,2), Markers[i].getCenter().x, Markers[i].getCenter().y);
+                    if (inputcolormap >= 0) {
+                        Markers[i].draw(rawimage, Scalar(0, 0, 0), 2, false);
+                        drawVectors(rawimage, Scalar (0,0,0), 1, (i+1)*20, Markers[i].id, 0, 0, Markers[i].Tvec.at<float>(0,2), Markers[i].getCenter().x, Markers[i].getCenter().y);
+                    } else {
+                        Markers[i].draw(rawimage, Scalar(0, 0, 255), 2, false);
+                        drawVectors(rawimage, Scalar (0,0,255), 1, (i+1)*20, Markers[i].id, 0, 0, Markers[i].Tvec.at<float>(0,2), Markers[i].getCenter().x, Markers[i].getCenter().y);
+                    }
                 }
             }
         }
