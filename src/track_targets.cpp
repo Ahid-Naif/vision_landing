@@ -113,7 +113,7 @@ void drawARLandingCube(cv::Mat &Image, Marker &m, const CameraParameters &CP, Sc
 
     vector< Point2f > imagePoints;
     cv::projectPoints(objectPoints, m.Rvec, m.Tvec, CP.CameraMatrix, CP.Distorsion, imagePoints);
-    // draw lines of different colours
+    // draw lines of different colors
     for (int i = 0; i < 4; i++)
         cv::line(Image, imagePoints[i], imagePoints[(i + 1) % 4], color, 1, CV_AA);
 
@@ -182,6 +182,7 @@ int main(int argc, char** argv) {
     args::ValueFlag<string> streamtype(parser, "streamtype", "Realsense Stream Type", {'s', "streamtype"});
     args::ValueFlag<string> camprofile(parser, "camprofile", "Realsense Camera Profile", {'p', "camprofile"});
     args::ValueFlag<int> colormap(parser, "colormap", "Colormap IR/Depth data", {"colormap"});
+    args::ValueFlag<int> depthscale(parser, "depthscale", "Depth Scale in micrometers", {"depthscale"});
     args::Positional<string> input(parser, "input", "Input Stream");
     args::Positional<string> calibration(parser, "calibration", "Calibration Data");
     args::Positional<double> markersize(parser, "markersize", "Marker Size");
@@ -221,36 +222,35 @@ int main(int argc, char** argv) {
     signal(SIGUSR2, handle_sigusr2);
 
     // If resolution is specified then use, otherwise use default
-    int inputwidth = 640;
-    int inputheight = 480;
+    int _width = 640;
+    int _height = 480;
     if (width)
-        inputwidth = args::get(width);
+        _width = args::get(width);
     if (height)
-        inputheight = args::get(height);
+        _height = args::get(height);
         
     // If fps is specified then use, otherwise use default
     // Note this doesn't seem to matter for network streaming, only when writing to file
-    int inputfps = 30;
+    int _fps = 30;
     if (fps)
-        inputfps = args::get(fps);
+        _fps = args::get(fps);
     
-    // If realsense streamtype is specified then use, otherwise set to colour stream
-    string inputstream = "colour";
+    // If realsense streamtype is specified then use, otherwise set to color stream
+    string _stream = "color";
     if (streamtype)
-        inputstream = args::get(streamtype);
+        _stream = args::get(streamtype);
 
-    // If brightness is specified then use, otherwise use default
-    double inputbrightness = 0.5;
-    if (brightness)
-        inputbrightness = args::get(brightness);
-
-    string inputprofile = "outdoors";
+    string _camprofile = "outdoors";
     if (camprofile)
-        inputprofile = args::get(camprofile);
+        _camprofile = args::get(camprofile);
     
-    int inputcolormap = 2;
+    int _colormap = -1;
     if (colormap)
-        inputcolormap = args::get(colormap);
+        _colormap = args::get(colormap);
+        
+    int _depthscale = 10000;
+    if (depthscale)
+        _depthscale = args::get(depthscale);
     
     /* Instead of opening a VideoCapture object, use librealsense */
     rs::context ctx;
@@ -261,26 +261,29 @@ int main(int argc, char** argv) {
     cout << "info:realsense:firmware:" << dev->get_firmware_version() << endl;
     
     // Pick input stream depending on streamtype setting
-    if (inputstream == "colour") {
-        cout << "info:realsense:stream:colour" << endl;
-        dev->enable_stream(rs::stream::color, inputwidth, inputheight, rs::format::bgr8, inputfps);
-    } else if (inputstream == "infrared" || inputstream == "hybrid") {
-        cout << "info:realsense:stream:" << inputstream << endl;
-        dev->enable_stream(rs::stream::color, inputwidth, inputheight, rs::format::bgr8, inputfps);
+    if (_stream == "color") {
+        cout << "info:realsense:stream:color" << endl;
+        dev->enable_stream(rs::stream::color, _width, _height, rs::format::bgr8, _fps);
+    } else if (_stream == "infrared" || _stream == "hybrid") {
+        cout << "info:realsense:stream:" << _stream << endl;
+        dev->set_option(rs::option::r200_depth_units, _depthscale); // Set depth units in micrometers - 1000 = mm scale, 10000 = cm scale
+        dev->enable_stream(rs::stream::color, _width, _height, rs::format::bgr8, _fps);
         // Configure Infrared stream
-        dev->enable_stream(rs::stream::infrared, inputwidth, inputheight, rs::format::y8, inputfps);
+        dev->enable_stream(rs::stream::infrared, _width, _height, rs::format::y8, _fps);
         // Must also configure depth stream for IR stream to run properly
-        dev->enable_stream(rs::stream::depth, inputwidth, inputheight, rs::format::z16, inputfps);
+        dev->enable_stream(rs::stream::depth, _width, _height, rs::format::z16, _fps);
     }
     dev->start();
 
-    if (inputprofile == "outdoors") {
+    if (_camprofile == "outdoors") {
         cout << "info::realsense:camprofile:outdoors" << endl;
         // Set camera settings - https://github.com/IntelRealSense/librealsense/issues/208#issuecomment-234763197 
         dev->set_option(rs::option::r200_emitter_enabled, 0); //disable IR laser pattern
         // dev->set_option(rs::option::color_enable_auto_exposure, 1); // disable/manual exposure
-        dev->set_option(rs::option::color_enable_auto_exposure, 3); // aperture priority / automatic exposure
+        dev->set_option(rs::option::color_enable_auto_exposure, 1); // aperture priority / automatic exposure
         dev->set_option(rs::option::color_backlight_compensation, 0);
+        dev->set_option(rs::option::color_exposure, 8);
+        dev->set_option(rs::option::color_gain, 100);
         dev->set_option(rs::option::color_brightness, 62);
         dev->set_option(rs::option::color_contrast, 38);
         dev->set_option(rs::option::color_contrast, 20);
@@ -315,28 +318,28 @@ int main(int argc, char** argv) {
     }
 
     // Take a single image and resize calibration parameters based on input stream dimensions
-    Mat rawimage(Size(inputwidth, inputheight), inputstream == "colour" ? CV_8UC3 : CV_8UC1, inputstream == "colour" ? (void*)dev->get_frame_data(rs::stream::color) :  (void*)dev->get_frame_data(rs::stream::infrared), Mat::AUTO_STEP);
+    Mat rawimage(Size(_width, _height), _stream == "color" ? CV_8UC3 : CV_8UC1, _stream == "color" ? (void*)dev->get_frame_data(rs::stream::color) :  (void*)dev->get_frame_data(rs::stream::infrared), Mat::AUTO_STEP);
     /*
     // Probably unnecessary to convert gray to rgb, aruco only converts it staright back to gray again.
-    if (inputstream == "infrared")
+    if (_stream == "infrared")
         cvtColor(rawimage,rawimage,CV_GRAY2RGB);
     */
     CamParam.resize(rawimage.size());
 
     // Calculate the fov from the calibration intrinsics
     const double pi = std::atan(1)*4;
-    const double fovx = 2 * atan(inputwidth / (2 * CamParam.CameraMatrix.at<float>(0,0))) * (180.0/pi); 
-    const double fovy = 2 * atan(inputheight / (2 * CamParam.CameraMatrix.at<float>(1,1))) * (180.0/pi);
-    cout << "info:FoVx~" << fovx << ":FoVy~" << fovy << ":vWidth~" << inputwidth << ":vHeight~" << inputheight << endl;
+    const double fovx = 2 * atan(_width / (2 * CamParam.CameraMatrix.at<float>(0,0))) * (180.0/pi); 
+    const double fovy = 2 * atan(_height / (2 * CamParam.CameraMatrix.at<float>(1,1))) * (180.0/pi);
+    cout << "info:FoVx~" << fovx << ":FoVy~" << fovy << ":vWidth~" << _width << ":vHeight~" << _height << endl;
 
     // Create an output object, if output specified then setup the pipeline unless output is set to 'window'
     VideoWriter writer;
     if (output && args::get(output) != "window") {
         if (fourcc) {
             string _fourcc = args::get(fourcc);
-            writer.open(args::get(output), CV_FOURCC(_fourcc[0], _fourcc[1], _fourcc[2], _fourcc[3]), inputfps, cv::Size(inputwidth, inputheight), true);
+            writer.open(args::get(output), CV_FOURCC(_fourcc[0], _fourcc[1], _fourcc[2], _fourcc[3]), _fps, cv::Size(_width, _height), true);
         } else {
-            writer.open(args::get(output), 0, inputfps, cv::Size(inputwidth, inputheight), true);
+            writer.open(args::get(output), 0, _fps, cv::Size(_width, _height), true);
         }
         if (!writer.isOpened()) {
             cerr << "Error can't create video writer" << endl;
@@ -419,7 +422,7 @@ int main(int argc, char** argv) {
         
         // Copy image from input stream to cv matrix, skip iteration if empty
         dev->wait_for_frames();
-        Mat rawimage(Size(inputwidth, inputheight), inputstream == "colour" ? CV_8UC3 : CV_8UC1, inputstream == "colour" ? (void*)dev->get_frame_data(rs::stream::color) :  (void*)dev->get_frame_data(rs::stream::infrared), Mat::AUTO_STEP);
+        Mat rawimage(Size(_width, _height), _stream == "color" ? CV_8UC3 : CV_8UC1, _stream == "color" ? (void*)dev->get_frame_data(rs::stream::color) :  (void*)dev->get_frame_data(rs::stream::infrared), Mat::AUTO_STEP);
         if (rawimage.empty()) continue;
 
         // Detect markers
@@ -512,10 +515,10 @@ int main(int argc, char** argv) {
         // Temp - if infrared stream, also retrieve depth image and use that to overlay AR markers
         // http://www.samontab.com/web/2016/04/interfacing-intel-realsense-f200-with-opencv/
         // https://software.intel.com/en-us/articles/using-librealsense-and-opencv-to-stream-rgb-and-depth-data
-        if (inputstream == "hybrid") {
+        if (_stream == "hybrid") {
            // Create depth image
-           cv::Mat depth16( inputheight,
-              inputwidth,
+           cv::Mat depth16( _height,
+              _width,
               CV_16U,
               (uchar *)dev->get_frame_data(rs::stream::depth));
             cv::Mat depth8u = depth16;
@@ -525,18 +528,18 @@ int main(int argc, char** argv) {
            // depth8u.convertTo( depth8u, CV_8UC1, 255.0/1000 );
            // depth16.convertTo( depth8u, CV_8UC1 );
             // equalizeHist(depth8u, depth8u);
-            if (inputcolormap >= 0) {
-                applyColorMap(depth8u, rawimage, inputcolormap);
+            if (_colormap >= 0) {
+                applyColorMap(depth8u, rawimage, _colormap);
             } else {
                 applyColorMap(depth8u, rawimage, COLORMAP_COOL);
             }
            // depth16.convertTo( rawimage, CV_8UC3 );
            // cvtColor(depth8u,rawimage,CV_GRAY2RGB);
            // rawimage = depth8u;
-        } else if (inputstream == "infrared") {
-            if (inputcolormap >= 0) {
+        } else if (_stream == "infrared") {
+            if (_colormap >= 0) {
                 equalizeHist(rawimage, rawimage);
-                applyColorMap(rawimage, rawimage, inputcolormap);
+                applyColorMap(rawimage, rawimage, _colormap);
             } else {
                 cvtColor(rawimage,rawimage,CV_GRAY2RGB);
             }
@@ -547,7 +550,7 @@ int main(int argc, char** argv) {
             // If marker id matches current active marker, draw a green AR cube
             if (Markers[i].id == active_marker) {
                 if (output) {
-                    if (inputcolormap >= 0) {
+                    if (_colormap >= 0) {
                         Markers[i].draw(rawimage, Scalar(255, 255, 255), 2, false);
                     } else {
                         Markers[i].draw(rawimage, Scalar(0, 255, 0), 2, false);
@@ -556,19 +559,19 @@ int main(int argc, char** argv) {
                 // If pose estimation was successful, draw AR cube and distance
                 if (Markers[i].Tvec.at<float>(0,2) > 0) {
                     // Calculate angular offsets in radians of center of detected marker
-                    double xoffset = (Markers[i].getCenter().x - inputwidth / 2.0) * (fovx * (pi/180)) / inputwidth;
-                    double yoffset = (Markers[i].getCenter().y - inputheight / 2.0) * (fovy * (pi/180)) / inputheight;
+                    double xoffset = (Markers[i].getCenter().x - _width / 2.0) * (fovx * (pi/180)) / _width;
+                    double yoffset = (Markers[i].getCenter().y - _height / 2.0) * (fovy * (pi/180)) / _height;
                     if (verbose)
                         cout << "debug:active_marker:" << active_marker << ":center~" << Markers[i].getCenter() << ":area~" << Markers[i].getArea() << ":marker~" << Markers[i] << endl;
                     cout << "target:" << Markers[i].id << ":" << xoffset << ":" << yoffset << ":" << Markers[i].Tvec.at<float>(0,2) << endl;
                     if (output) { // don't burn cpu cycles if no output
-                        if (inputcolormap >= 0) {
+                        if (_colormap >= 0) {
                             drawARLandingCube(rawimage, Markers[i], CamParam, Scalar(255, 255, 255, 255));
                         } else {
                             drawARLandingCube(rawimage, Markers[i], CamParam, Scalar(0, 255, 0, 255));
                         }
                         CvDrawingUtils::draw3dAxis(rawimage, Markers[i], CamParam);
-                        if (inputcolormap >= 0) {
+                        if (_colormap >= 0) {
                             drawVectors(rawimage, Scalar (255,255,255), 1, (i+1)*20, Markers[i].id, xoffset, yoffset, Markers[i].Tvec.at<float>(0,2), Markers[i].getCenter().x, Markers[i].getCenter().y);
                         } else {
                             drawVectors(rawimage, Scalar (0,255,0), 1, (i+1)*20, Markers[i].id, xoffset, yoffset, Markers[i].Tvec.at<float>(0,2), Markers[i].getCenter().x, Markers[i].getCenter().y);
@@ -578,7 +581,7 @@ int main(int argc, char** argv) {
             // Otherwise draw a red square
             } else {
                 if (output) { // don't burn cpu cycles if no output
-                    if (inputcolormap >= 0) {
+                    if (_colormap >= 0) {
                         Markers[i].draw(rawimage, Scalar(0, 0, 0), 2, false);
                         drawVectors(rawimage, Scalar (0,0,0), 1, (i+1)*20, Markers[i].id, 0, 0, Markers[i].Tvec.at<float>(0,2), Markers[i].getCenter().x, Markers[i].getCenter().y);
                     } else {
