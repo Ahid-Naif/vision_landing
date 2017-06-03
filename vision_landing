@@ -146,6 +146,8 @@ class TrackTargets:
             self.track_arguments.extend(['--depthscale', args.depthscale])
         if args.camprofile:
             self.track_arguments.extend(['--camprofile', args.camprofile])
+        if args.colormap:
+            self.track_arguments.extend(['--colormap', args.colormap])
         # Add positional arguments
         self.track_arguments.extend([args.input, calibration, args.markersize])
     def launch(self):
@@ -344,6 +346,7 @@ parser.add_argument('--controlprocessing', '-p', action='store_true', help="Cont
 parser.add_argument('--streamtype', default="colour", help="Intel RealSense stream type - colour or infrared")
 parser.add_argument('--depthscale', help="RealSense Depth Scale in micrometers")
 parser.add_argument('--camprofile', help="RealSense camera settings profile - indoors or outoors")
+parser.add_argument('--colormap', help="Apply color mapping to IR/Depth streams")
 args = parser.parse_args()
 # First parse config file, and set defaults
 defaults = {}
