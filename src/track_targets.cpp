@@ -279,8 +279,8 @@ int main(int argc, char** argv) {
         cout << "info::realsense:camprofile:outdoors" << endl;
         // Set camera settings - https://github.com/IntelRealSense/librealsense/issues/208#issuecomment-234763197 
         dev->set_option(rs::option::r200_emitter_enabled, 0); //disable IR laser pattern
-        // dev->set_option(rs::option::color_enable_auto_exposure, 1); // disable/manual exposure
-        dev->set_option(rs::option::color_enable_auto_exposure, 1); // aperture priority / automatic exposure
+        dev->set_option(rs::option::color_enable_auto_exposure, 1); // disable/manual exposure
+        // dev->set_option(rs::option::color_enable_auto_exposure, 3); // aperture priority / automatic exposure
         dev->set_option(rs::option::color_backlight_compensation, 0);
         dev->set_option(rs::option::color_exposure, 8);
         dev->set_option(rs::option::color_gain, 100);
@@ -512,30 +512,19 @@ int main(int argc, char** argv) {
             }
         }
     
-        // Temp - if infrared stream, also retrieve depth image and use that to overlay AR markers
+        // If hybrid stream requested, also retrieve depth image and use that to overlay AR markers
         // http://www.samontab.com/web/2016/04/interfacing-intel-realsense-f200-with-opencv/
         // https://software.intel.com/en-us/articles/using-librealsense-and-opencv-to-stream-rgb-and-depth-data
         if (_stream == "hybrid") {
-           // Create depth image
-           cv::Mat depth16( _height,
-              _width,
-              CV_16U,
-              (uchar *)dev->get_frame_data(rs::stream::depth));
+            // Create depth image
+            cv::Mat depth16( _height, _width, CV_16U, (uchar *)dev->get_frame_data(rs::stream::depth));
             cv::Mat depth8u = depth16;
-            depth8u.convertTo( depth8u, CV_8UC1, 255.0/1000 );
-            // depth8u.convertTo( depth8u, CV_8UC1, 1/256.0 );
-           // cv::Mat depth8u;
-           // depth8u.convertTo( depth8u, CV_8UC1, 255.0/1000 );
-           // depth16.convertTo( depth8u, CV_8UC1 );
-            // equalizeHist(depth8u, depth8u);
+            depth8u.convertTo( depth8u, CV_8UC1, 255.0/_depthscale );
             if (_colormap >= 0) {
                 applyColorMap(depth8u, rawimage, _colormap);
             } else {
                 applyColorMap(depth8u, rawimage, COLORMAP_COOL);
             }
-           // depth16.convertTo( rawimage, CV_8UC3 );
-           // cvtColor(depth8u,rawimage,CV_GRAY2RGB);
-           // rawimage = depth8u;
         } else if (_stream == "infrared") {
             if (_colormap >= 0) {
                 equalizeHist(rawimage, rawimage);
@@ -614,4 +603,3 @@ int main(int argc, char** argv) {
     return 0;
 
 }
-
